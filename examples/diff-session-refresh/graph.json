@@ -1,0 +1,170 @@
+{
+  "meta": {
+    "title": { "th": "เพิ่ม session refresh อัตโนมัติ", "en": "Add automatic session refresh" },
+    "mode": "diff",
+    "language": "th-en",
+    "edges": "flow",
+    "stat": "4 files changed, +84 -31",
+    "task": { "th": "เพิ่ม token refresh อัตโนมัติ", "en": "Add automatic token refresh" },
+    "note": "Synthetic schema example. The paths below do not exist in any real repository."
+  },
+  "groups": [
+    { "id": "ui", "label": { "th": "ส่วน UI", "en": "UI" } },
+    { "id": "auth", "label": { "th": "ชั้น Authentication", "en": "Authentication layer" } }
+  ],
+  "nodes": [
+    {
+      "id": "login-page",
+      "label": "Login.tsx",
+      "type": "component",
+      "change": "modified",
+      "group": "ui",
+      "description": { "th": "หน้า login ที่เรียก AuthService", "en": "Login screen that calls AuthService" },
+      "explanation": { "th": "เลิกเก็บ token เอง แล้วเรียก AuthService.login() แทน", "en": "Stops storing the token itself and calls AuthService.login() instead" },
+      "why": {
+        "fact": { "th": "โค้ดที่เขียน token ลง localStorage ถูกลบออกจาก component", "en": "The code writing the token to localStorage was removed from the component" },
+        "inference": { "th": "น่าจะเพื่อให้ component ไม่ต้องรู้เรื่อง session lifecycle", "en": "Likely so the component no longer needs to know about the session lifecycle" }
+      },
+      "changes": [
+        {
+          "kind": "removed",
+          "label": "localStorage.setItem(\"token\", result.token)",
+          "explanation": { "th": "ความรับผิดชอบนี้ถูกลบออกจาก UI component แต่ไม่ได้หายไปจากแอป", "en": "This responsibility left the UI component; it did not leave the application" },
+          "replacedBy": ["sessionStore.setSession(session)"],
+          "why": { "inference": { "th": "น่าจะเพื่อลบ session handling ที่ซ้ำกันออกจาก component", "en": "Likely removes duplicated session handling from the component" } }
+        },
+        {
+          "kind": "modified",
+          "label": "handleSubmit()",
+          "before": "api.login(email, password)\n→ รับ token\n→ เขียน localStorage",
+          "after": "authService.login(email, password)\n→ คืน session\n→ sessionStore.setSession()",
+          "explanation": { "th": "UI รู้เพียงว่าได้ session แล้วส่งต่อให้ session store", "en": "The UI only knows it received a session and hands it to the session store" }
+        }
+      ],
+      "learn": { "th": "Component ควรรับผิดชอบ render และ user interaction", "en": "Components should own rendering and user interaction" },
+      "evidence": [{ "path": "src/ui/Login.tsx", "symbol": "handleSubmit" }]
+    },
+    {
+      "id": "auth-service",
+      "label": "AuthService",
+      "type": "service",
+      "change": "modified",
+      "group": "auth",
+      "description": { "th": "ศูนย์กลางของ authentication ทั้ง UI และ middleware เรียกผ่านตรงนี้", "en": "Central authentication service; both UI and middleware go through it" },
+      "explanation": { "th": "เพิ่ม refreshSession() และ retry request เมื่อ token หมดอายุ", "en": "Adds refreshSession() and retries the request when the token has expired" },
+      "before": "request\n  ↓\ntoken expired\n  ↓\nrequest fails",
+      "after": "request\n  ↓\ntoken expired?\n  ↓ yes\nrefreshSession()\n  ↓\nretry request",
+      "why": {
+        "fact": { "th": "refreshSession() เป็นเจ้าของ logic การ refresh ทั้งหมด", "en": "refreshSession() now owns all refresh behaviour" },
+        "inference": { "th": "การรวม logic ไว้ที่เดียวช่วยไม่ให้แต่ละ component เขียน refresh เอง", "en": "Centralising this keeps UI components from implementing refresh independently" },
+        "unknown": { "th": "ไม่มีหลักฐานว่าทำไมเลือก retry เพียงครั้งเดียว", "en": "Nothing in the evidence explains why only one retry was chosen" }
+      },
+      "changes": [
+        {
+          "kind": "added",
+          "label": "refreshSession()",
+          "explanation": { "th": "ขอ access token ใหม่จาก refresh token", "en": "Requests a new access token using the refresh token" },
+          "calledBy": ["AuthService.request()"],
+          "calls": ["POST /auth/refresh"],
+          "learn": { "th": "recovery path ทำให้ token expiry ไม่บังคับให้ user login ใหม่ทันที", "en": "A recovery path means token expiry no longer forces an immediate re-login" },
+          "evidence": [{ "path": "src/auth/auth.ts", "symbol": "refreshSession" }]
+        },
+        {
+          "kind": "modified",
+          "label": "request()",
+          "before": "if (!token) {\n  logout()\n}",
+          "after": "if (!token) {\n  await refreshSession()\n}",
+          "explanation": { "th": "จาก token หมดอายุ → logout กลายเป็น ลอง recover ก่อน แล้ว logout เมื่อ recover ไม่สำเร็จ", "en": "From expired token → logout, to attempt recovery first and log out only if recovery fails" }
+        },
+        {
+          "kind": "removed",
+          "label": "expireAndLogout()",
+          "explanation": { "th": "branch เดิมไม่จำเป็นแล้ว เพราะ refreshSession() จัดการ token expiry ก่อนถึงเงื่อนไขนี้", "en": "The old branch became unnecessary because refreshSession() handles expiry before this condition is reached" },
+          "replacedBy": ["refreshSession()"]
+        }
+      ],
+      "runtime": { "th": "request ที่เจอ 401 จะถูก retry หนึ่งครั้งหลัง refresh สำเร็จ", "en": "A request that hits 401 is retried once after a successful refresh" },
+      "tests": { "th": "tests ยืนยัน 3 พฤติกรรม: refresh เมื่อหมดอายุ, logout เมื่อ refresh ล้มเหลว, retry request เดิม", "en": "Tests pin three behaviours: refresh on expiry, logout on failed refresh, retry of the original request" },
+      "risks": { "th": "ทุก protected route ผ่าน module นี้ ถ้า refresh ค้างจะกระทบทุก request", "en": "Every protected route passes through this module, so a hung refresh affects every request" },
+      "learn": { "th": "Separation of concerns: behavior ของ auth อยู่ใน service ไม่ใช่ใน UI", "en": "Separation of concerns: auth behaviour lives in the service, not the UI" },
+      "evidence": [
+        { "path": "src/auth/auth.ts", "symbol": "refreshSession" },
+        { "path": "src/auth/auth.test.ts", "symbol": "describe('refreshSession')" }
+      ]
+    },
+    {
+      "id": "session-store",
+      "label": "SessionStore",
+      "type": "store",
+      "change": "added",
+      "group": "auth",
+      "description": { "th": "เก็บ session state (access token, refresh token, เวลาหมดอายุ)", "en": "Holds session state (access token, refresh token, expiry)" },
+      "explanation": { "th": "ไฟล์ใหม่ รับหน้าที่เก็บ session ที่เคยอยู่ใน Login.tsx", "en": "New file; takes over the session storage that used to live in Login.tsx" },
+      "why": {
+        "inference": { "th": "แยกเป็นไฟล์เพราะเป็น state ไม่ใช่ rendering logic", "en": "Split out because it is state, not rendering logic" }
+      },
+      "evidence": [{ "path": "src/auth/sessionStore.ts", "symbol": "SessionStore" }]
+    },
+    {
+      "id": "auth-middleware",
+      "label": "authMiddleware",
+      "type": "middleware",
+      "change": "unchanged",
+      "group": "auth",
+      "description": { "th": "ตรวจ session ก่อนเข้า protected route", "en": "Checks the session before protected routes" },
+      "evidence": [{ "path": "src/auth/authMiddleware.ts", "symbol": "authMiddleware" }]
+    },
+    {
+      "id": "api-client",
+      "label": "ApiClient",
+      "type": "service",
+      "change": "unchanged",
+      "description": { "th": "HTTP client กลางของแอป", "en": "The app's shared HTTP client" },
+      "evidence": [{ "path": "src/api/apiClient.ts", "symbol": "request" }]
+    },
+    {
+      "id": "backend-api",
+      "label": "Backend API",
+      "type": "external",
+      "change": "unchanged",
+      "description": { "th": "ระบบภายนอก ไม่อยู่ใน repository นี้", "en": "External system, not part of this repository" }
+    }
+  ],
+  "edges": [
+    { "source": "login-page", "target": "auth-service", "type": "calls", "label": "login()" },
+    { "source": "auth-middleware", "target": "auth-service", "type": "calls", "label": "getSession()" },
+    { "source": "auth-service", "target": "session-store", "type": "writes", "label": { "th": "เก็บ session", "en": "stores session" } },
+    { "source": "auth-service", "target": "api-client", "type": "calls", "label": { "th": "refresh แล้ว retry", "en": "refresh, then retry" } },
+    { "source": "api-client", "target": "backend-api", "type": "calls", "label": "HTTP", "confidence": "inference" }
+  ],
+  "summary": {
+    "changes": [
+      { "kind": "added", "text": { "th": "refreshSession() และ SessionStore", "en": "refreshSession() and SessionStore" } },
+      { "kind": "added", "text": { "th": "tests 3 ตัวของ refresh lifecycle", "en": "3 tests for the refresh lifecycle" } },
+      { "kind": "removed", "text": { "th": "การเก็บ token โดยตรงใน Login.tsx", "en": "Direct token persistence in Login.tsx" } },
+      { "kind": "modified", "text": { "th": "lifecycle ของ authenticated request", "en": "The authenticated request lifecycle" } },
+      { "kind": "moved", "text": { "th": "session persistence จาก UI → SessionStore", "en": "Session persistence from the UI → SessionStore" } }
+    ],
+    "overall": { "th": "ความรับผิดชอบด้าน authentication ย้ายออกจาก UI component ไปอยู่ใน service/store layer", "en": "Authentication responsibility is moving out of UI components into dedicated service and store layers" },
+    "replacements": [
+      { "removed": "localStorage token", "added": "sessionStore.setSession()", "note": { "th": "ย้ายที่ ไม่ได้หายไป", "en": "Relocated, not removed" } },
+      { "removed": "expireAndLogout()", "added": "refreshSession()", "note": { "th": "behavior เปลี่ยน: recover ก่อน logout", "en": "Behaviour changed: recover before logging out" } }
+    ],
+    "insight": {
+      "th": "การแก้ครั้งนี้เพิ่ม lifecycle สำหรับ refresh token โดยให้ AuthService เป็นศูนย์กลาง แทนการกระจาย logic ไว้หลาย component",
+      "en": "This change adds a token refresh lifecycle with AuthService at the centre instead of spreading the logic across components"
+    },
+    "before": "request → token expired → request fails",
+    "after": "request\n  ↓\ntoken expired?\n  ↓ yes\nrefresh session\n  ↓\nretry request",
+    "hotspots": [
+      { "th": "AuthService.refreshSession() คือจุดเดียวที่ตัดสินใจเรื่อง refresh", "en": "AuthService.refreshSession() is the single place that decides on refresh" }
+    ],
+    "risks": [
+      { "th": "Blast radius: auth.ts → authMiddleware.ts → ทุก protected route", "en": "Blast radius: auth.ts → authMiddleware.ts → every protected route" }
+    ],
+    "next": { "th": "อ่าน tests ของ refreshSession เพื่อดู behavior ที่ถูกรับประกัน", "en": "Read the refreshSession tests to see which behaviour is guaranteed" },
+    "learn": [
+      { "th": "Separation of concerns: Component ดูแล render, AuthService ดูแล authentication behavior, SessionStore ดูแล session state", "en": "Separation of concerns: the component renders, AuthService owns authentication behaviour, SessionStore owns session state" }
+    ]
+  }
+}
