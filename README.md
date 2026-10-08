@@ -28,6 +28,30 @@ Options: `--lang auto|th|en|th-en|en-th`, `--interactive`, `--static`, `--mermai
 
 Output goes to `.showme/<topic>/` inside the repository you run it in. Open `index.html` in a browser.
 
+## Guided reading
+
+Every page opens as a guided reader instead of a wall of sections, so you can see what happened, why, how it changed, what it affects and where the evidence is without interpreting the whole graph yourself.
+
+- **Start here:** the title, a one-sentence TL;DR, the task, the scope, the node to look at first, and a "Start guided reading" button.
+- **Five steps:** Problem → Root cause → Fix → Impact and risks → Evidence. Each step has one main idea, a short explanation and collapsed technical details. You can go back, jump to any step, or skip ahead at any time.
+- **Focused graph:** the explorer opens on one critical path through the key node at a readable size, with a "View full graph" button for everything else.
+- **Inspector:** selecting a node answers three questions first (What is it? Why does it matter? How is it connected?), then offers expandable sections. Every source path has a Copy button.
+- **Reader controls:** text size, Auto/Light/Dark theme and reading width, remembered in your browser.
+
+### Three reading modes
+
+| Mode | What you see |
+|---|---|
+| **Scan** | An at-a-glance summary: problem, root cause, key changes, main risk, next action. Everything else is collapsed. |
+| **Understand** (default) | One guided step at a time, with the graph limited to the critical path and evidence collapsed until you ask for it. |
+| **Deep Dive** | Everything open: all five steps, the full graph, the git diff summary, changed symbols, risks, tests, unknowns and the complete evidence table. |
+
+Switching mode only changes presentation. Nothing is removed, the content is derived from `graph.json` on every build, and a field the source does not provide is shown as "Not available in source".
+
+Confidence labels (FACT, INFERENCE, UNKNOWN) are drawn in a neutral colour with different borders and glyphs, while change status (added, modified, deleted, moved) uses colour plus a word, so the two are never told apart by colour alone. Both themes meet WCAG AA contrast.
+
+Links can point at a state: `index.html#step-3`, `index.html#mode-deep`, `index.html#node-<id>`.
+
 ## How it works
 
 Every run writes one `graph.json`, and `scripts/showme.mjs` derives everything else from it: the Mermaid source, the HTML page, the explorer and `summary.md`. The explorer in `viewer/` is plain JavaScript and SVG with no dependencies, and the page still reads correctly with JavaScript disabled.
