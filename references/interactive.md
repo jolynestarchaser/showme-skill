@@ -32,6 +32,20 @@ Everything stays under `.showme/`. Never add a visualization dependency to the a
 
 Re-run step 5 after any change to `graph.json`. Do not hand-edit `index.html`, `showme.js` or `showme.css` inside `.showme/`; they are overwritten on the next build.
 
+## Guided reading
+
+Every page opens as a guided reader, not as a wall of sections. All of it is derived from `graph.json` by the build script; nothing is authored per report, and a missing field renders "Not available in source".
+
+- **Start here:** title, one-sentence TL;DR (`summary.insight`), task, scope, the key node, and a "Start guided reading" button.
+- **Five steps:** Problem → Root cause → Fix → Impact and risks → Evidence, each with one main idea, a short body and collapsed technical details. Previous, Next, jump and "Skip to Deep Dive" all work; nothing is locked.
+- **Three reading modes:** Scan (at-a-glance summary, everything else collapsed), Understand (default: one step at a time, graph limited to the critical path), Deep Dive (every section open, full graph, all inspector sections open).
+- **Key node and critical path:** the key node is the changed node with the most detail; the critical path is one chain through it from a source to a sink. When no chain of at least three nodes exists, the page says so and shows the full graph.
+- **Reader controls:** text size (A−, A, A+), theme (Auto, Light, Dark), reading width. Saved in the browser's `localStorage`.
+- **Addressable state:** `#step-<1-5>`, `#mode-<scan|understand|deep>`, `#node-<id>[:<n>]`.
+- **Without JavaScript:** Start here, all five steps, the static diagram and every original section remain readable; the original sections are native `<details>` elements.
+
+Confidence tags (FACT, INFERENCE, UNKNOWN) use a neutral colour with different border styles and glyphs. Change status (added, modified, deleted, moved) uses colour plus a word. The two are never distinguished by colour alone.
+
 ## What the explorer does
 
 - pan (drag), zoom (wheel or buttons), fit to screen, reset view

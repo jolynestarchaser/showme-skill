@@ -229,24 +229,6 @@ function itemHtml(c) {
   return `<li class="sm-k-${KIND_CLASS[c.kind]}"><code>${SIGIL[c.kind]} ${esc(c.label)}</code> <span class="sm-muted">${ui(c.kind)}</span>${detail ? `<div class="sm-detail">${detail}</div>` : ''}</li>`;
 }
 
-function diffSummary(g) {
-  const s = g.summary || {};
-  if (!(s.changes || []).length && !(s.replacements || []).length && !g.meta.stat && !s.overall) return '';
-  const groups = KINDS.map((k) => {
-    const items = (s.changes || []).filter((c) => c.kind === k);
-    return items.length ? `<div class="sm-field"><h4>${SIGIL[k]} ${ui(k)}</h4><ul>${items.map((c) => `<li>${both(c.text)}</li>`).join('')}</ul></div>` : '';
-  }).join('');
-  const reps = (s.replacements || []).length ? `<h3>${ui('replacements')}</h3><div class="sm-scroll"><table><tbody>${s.replacements.map((r) =>
-    `<tr><td class="sm-k-removed"><code>- ${esc(r.removed)}</code></td><td>→</td><td class="sm-k-added"><code>+ ${esc(r.added)}</code></td><td>${both(r.note)}</td></tr>`).join('')}</tbody></table></div>` : '';
-  return `<section class="sm-section">
-  <h2>${ui('diff')}</h2>
-  ${g.meta.stat ? `<p class="sm-stat">${esc(g.meta.stat)}</p>` : ''}
-  <div class="sm-ba">${groups}</div>
-  ${s.overall ? `<p class="sm-lead">${both(s.overall)}</p>` : ''}
-  ${reps}
-</section>`;
-}
-
 function changeCard(n) {
   return `<article class="sm-card" id="card-${esc(n.id)}">
 <h3>${both(n.label)} ${badge(n)}</h3>
@@ -263,65 +245,208 @@ ${block('evidence', (n.evidence || []).length ? `<ul class="sm-ev">${evidenceHtm
 </article>`;
 }
 
-function buildHtml(g, svgs, interactive) {
+// ---- Guided reading ----
+// Everything here is derived from graph.json. Nothing is authored per report, and a field that is
+// absent renders "Not available in source" instead of a guess.
+Object.assign(UI.en, { startHere: 'Start here', tldr: 'TL;DR', scope: 'Scope', keyNode: 'Start with', start: 'Start guided reading', skipAll: 'Skip to full details',
+  glance: 'At a glance', problem: 'Problem', cause: 'Root cause', keyChanges: 'Key changes', mainRisk: 'Main risk', na: 'Not available in source',
+  step: 'Step', s1: 'Problem — what happened?', s2: 'Root cause — why did it happen?', s3: 'Fix — how was it changed?', s4: 'Impact and risks — what does it affect?', s5: 'Evidence — check it yourself',
+  n1: 'Problem', n2: 'Root cause', n3: 'Fix', n4: 'Impact', n5: 'Evidence',
+  prev: 'Previous', nextStep: 'Next', backSummary: 'Back to summary', deepDive: 'Open Deep Dive', skipDeep: 'Skip to Deep Dive', tech: 'Technical details',
+  where: 'Where', otherChanged: 'Other changed parts', unknowns: 'Unknowns', inferred: 'Inferred relationships', path: 'Critical path',
+  noPath: 'No single critical path could be identified from the graph. Use the full graph below.', s5idea: 'Every claim above traces back to these source locations. Follow the path, then open any node for its full details.',
+  openGraph: 'Open the graph', fullDetails: 'Full details', map: 'Visual map' });
+Object.assign(UI.th, { startHere: 'เริ่มอ่านที่นี่', tldr: 'สรุปสั้น', scope: 'ขอบเขต', keyNode: 'เริ่มดูที่', start: 'เริ่มอ่านแบบนำทาง', skipAll: 'ข้ามไปดูรายละเอียดทั้งหมด',
+  glance: 'สรุปภาพรวม', problem: 'ปัญหา', cause: 'สาเหตุ', keyChanges: 'การเปลี่ยนแปลงหลัก', mainRisk: 'ความเสี่ยงหลัก', na: 'ไม่มีข้อมูลนี้ใน source',
+  step: 'ขั้นที่', s1: 'ปัญหา — เกิดอะไรขึ้น?', s2: 'สาเหตุ — ทำไมจึงเกิด?', s3: 'การแก้ — แก้อย่างไร?', s4: 'ผลกระทบและความเสี่ยง — กระทบอะไร?', s5: 'หลักฐาน — ตรวจสอบต่อ',
+  n1: 'ปัญหา', n2: 'สาเหตุ', n3: 'การแก้', n4: 'ผลกระทบ', n5: 'หลักฐาน',
+  prev: 'ก่อนหน้า', nextStep: 'ถัดไป', backSummary: 'กลับไปที่สรุป', deepDive: 'เปิด Deep Dive', skipDeep: 'ข้ามไป Deep Dive', tech: 'รายละเอียดทางเทคนิค',
+  where: 'ตำแหน่ง', otherChanged: 'ส่วนอื่นที่เปลี่ยน', unknowns: 'สิ่งที่ยังไม่ทราบ', inferred: 'ความสัมพันธ์ที่เป็นข้อสันนิษฐาน', path: 'เส้นทางหลัก',
+  noPath: 'ไม่สามารถระบุเส้นทางหลักเส้นเดียวจาก graph ได้อย่างน่าเชื่อถือ ให้ดู graph เต็มด้านล่าง', s5idea: 'ทุกข้อสรุปด้านบนอ้างอิงกลับไปยังตำแหน่งใน source เหล่านี้ ไล่ตามเส้นทาง แล้วเปิด node ที่ต้องการเพื่อดูรายละเอียดทั้งหมด',
+  openGraph: 'เปิด graph', fullDetails: 'รายละเอียดทั้งหมด', map: 'แผนภาพ' });
+
+const DETAIL_FIELDS = ['description', 'explanation', 'before', 'after', 'why', 'runtime', 'tests', 'risks', 'learn', 'changes', 'evidence'];
+const filled = (v) => v != null && v !== '' && !(Array.isArray(v) && !v.length);
+const isChanged = (n) => (n.change && n.change !== 'unchanged') || ['modify', 'create', 'partial'].includes(n.status);
+
+// Key node = the changed node with the most detail. Critical path = one chain through it, walking
+// edges upstream to a source and downstream to a sink. Returns path: null when no reliable chain exists.
+function derive(g) {
+  const edges = g.edges || [];
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const score = (n) => DETAIL_FIELDS.filter((f) => filled(n[f])).length;
+  const outDeg = (id) => edges.filter((e) => e.source === id).length;
+  const pool = g.nodes.filter(isChanged);
+  const key = (pool.length ? pool : g.nodes).slice().sort((a, b) => score(b) - score(a) || outDeg(b.id) - outDeg(a.id))[0];
+  const seen = new Set([key.id]);
+  const walk = (from, dir) => {
+    const out = [];
+    for (let cur = from; ;) {
+      const next = edges.map((e, i) => ({ e, i, other: dir === 'up' ? e.source : e.target }))
+        .filter((x) => (dir === 'up' ? x.e.target : x.e.source) === cur && !seen.has(x.other) && byId.has(x.other))
+        .sort((a, b) => (a.e.confidence && a.e.confidence !== 'fact' ? 1 : 0) - (b.e.confidence && b.e.confidence !== 'fact' ? 1 : 0) ||
+          (dir === 'up' ? Number(isChanged(byId.get(b.other))) - Number(isChanged(byId.get(a.other))) || score(byId.get(b.other)) - score(byId.get(a.other)) : 0) || a.i - b.i)[0];
+      if (!next) break;
+      seen.add(next.other); out.push(next.other); cur = next.other;
+    }
+    return out;
+  };
+  const path = [...walk(key.id, 'up').reverse(), key.id, ...walk(key.id, 'down')];
+  return { key: key.id, path: path.length >= 3 ? path : null };
+}
+
+const na = () => `<span class="sm-na">${ui('na')}</span>`;
+const nodeLink = (n) => `<a class="sm-nodelink" href="#node-${esc(n.id)}">${both(n.label)}</a>`;
+
+function diffInner(g) {
+  const s = g.summary || {};
+  const groups = KINDS.map((k) => {
+    const items = (s.changes || []).filter((c) => c.kind === k);
+    return items.length ? `<div class="sm-field"><h4>${SIGIL[k]} ${ui(k)}</h4><ul>${items.map((c) => `<li>${both(c.text)}</li>`).join('')}</ul></div>` : '';
+  }).join('');
+  const reps = (s.replacements || []).length ? `<h3>${ui('replacements')}</h3><div class="sm-scroll"><table><tbody>${s.replacements.map((r) =>
+    `<tr><td class="sm-k-removed"><code>- ${esc(r.removed)}</code></td><td>→</td><td class="sm-k-added"><code>+ ${esc(r.added)}</code></td><td>${both(r.note)}</td></tr>`).join('')}</tbody></table></div>` : '';
+  if (!groups && !reps && !g.meta.stat && !s.overall) return '';
+  return `${g.meta.stat ? `<p class="sm-stat">${esc(g.meta.stat)}</p>` : ''}${groups ? `<div class="sm-ba">${groups}</div>` : ''}${s.overall ? `<p class="sm-lead">${both(s.overall)}</p>` : ''}${reps}`;
+}
+
+function stepHtml(i, idea, body, tech) {
+  const prev = i > 1 ? `<a class="sm-btn" href="#step-${i - 1}">← ${ui('prev')}</a>` : `<a class="sm-btn" href="#start">↑ ${ui('backSummary')}</a>`;
+  const next = i < 5 ? `<a class="sm-btn sm-btn-primary" href="#step-${i + 1}">${ui('nextStep')} →</a>` : `<a class="sm-btn sm-btn-primary" href="#mode-deep">${ui('deepDive')}</a>`;
+  return `<section class="sm-step" id="step-${i}" data-step="${i}" aria-labelledby="step-${i}-h">
+<p class="sm-kicker">${ui('step')} ${i} / 5</p>
+<h2 id="step-${i}-h">${ui('s' + i)}</h2>
+<p class="sm-idea">${idea || na()}</p>
+${body || ''}
+${tech ? `<details class="sm-tech"><summary>${ui('tech')}</summary>${tech}</details>` : ''}
+<nav class="sm-stepnav">${prev}<span class="sm-stepcount">${i} / 5</span>${next}${i < 5 ? `<a class="sm-quiet" href="#mode-deep">${ui('skipDeep')}</a>` : ''}</nav>
+</section>`;
+}
+
+function guidedHtml(g, d) {
+  const s = g.summary || {};
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const k = byId.get(d.key);
+  const others = g.nodes.filter((n) => isChanged(n) && n !== k);
+  const why = k.why || {};
+  const causeKind = CONFIDENCE.find((c) => why[c]);
+  const causeIdea = causeKind ? `<span class="sm-tag sm-tag-${causeKind}">${ui(causeKind)}</span> ${both(why[causeKind])}` : s.insight ? both(s.insight) : '';
+  const restWhy = Object.fromEntries(CONFIDENCE.filter((c) => c !== causeKind && why[c]).map((c) => [c, why[c]]));
+  const where = `<p class="sm-where">${ui('where')}: ${nodeLink(k)}</p>`;
+  const unknowns = g.nodes.filter((n) => n.why && n.why.unknown).map((n) => `<li>${nodeLink(n)}: ${both(n.why.unknown)}</li>`).join('');
+  const inferred = (g.edges || []).filter((e) => e.confidence && e.confidence !== 'fact')
+    .map((e) => `<li>${nodeLink(byId.get(e.source))} <span class="sm-arrow">→</span> ${nodeLink(byId.get(e.target))} ${both(e.label)} <span class="sm-tag sm-tag-${e.confidence}">${ui(e.confidence)}</span></li>`).join('');
+  const pathNodes = (d.path || []).map((id) => byId.get(id));
+  const evNodes = (pathNodes.length ? pathNodes : g.nodes).filter((n) => (n.evidence || []).length);
+
+  const s1 = stepHtml(1, g.meta.task ? both(g.meta.task) : '', block('before', both(s.before, 'pre')), g.meta.stat ? `<p class="sm-stat">${esc(g.meta.stat)}</p>` : '');
+  const s2 = stepHtml(2, causeIdea,
+    where + whyHtml(restWhy) + block('hotspots', list(s.hotspots)),
+    others.filter((n) => n.why).map((n) => `<h4>${nodeLink(n)}</h4>${whyHtml(n.why)}`).join(''));
+  const s3 = stepHtml(3, s.overall ? both(s.overall) : k.explanation ? both(k.explanation) : '',
+    (s.before || s.after ? `<div class="sm-ba">${block('before', both(s.before, 'pre'))}${block('after', both(s.after, 'pre'))}</div>` : '') +
+    where + (s.overall && k.explanation ? `<p>${both(k.explanation)}</p>` : '') +
+    block('symbols', (k.changes || []).length ? `<ul class="sm-delta">${k.changes.map(itemHtml).join('')}</ul>` : ''),
+    diffInner(g) + (others.length ? `<h4>${ui('otherChanged')}</h4><ul>${others.map((n) => `<li>${nodeLink(n)} ${badge(n)}${n.explanation ? ' ' + both(n.explanation) : ''}</li>`).join('')}</ul>` : ''));
+  const s4 = stepHtml(4, k.runtime ? both(k.runtime) : (s.risks || []).length ? both(s.risks[0]) : '',
+    block('tests', k.tests ? `<p>${both(k.tests)}</p>` : '') +
+    (k.risks ? `<div class="sm-sem-risk">${block('risk', `<p>${both(k.risks)}</p>`)}</div>` : '') +
+    block('risks', list(s.risks)) + block('unknowns', unknowns ? `<ul>${unknowns}</ul>` : '') +
+    (s.next ? `<div class="sm-sem-result">${block('next', `<p>${both(s.next)}</p>`)}</div>` : ''),
+    inferred ? `<h4>${ui('inferred')}</h4><ul class="sm-rels">${inferred}</ul>` : '');
+  const s5 = stepHtml(5, ui('s5idea'),
+    (pathNodes.length ? block('path', `<ol class="sm-chain">${pathNodes.map((n) => `<li>${nodeLink(n)}</li>`).join('')}</ol>`) : `<p>${ui('noPath')}</p>`) +
+    evNodes.map((n) => `<h4>${nodeLink(n)}</h4><ul class="sm-ev">${evidenceHtml(n)}</ul>`).join('') +
+    `<p><a href="#map">${ui('openGraph')}</a> · <a href="#mode-deep">${ui('fullDetails')}</a></p>`, '');
+
+  const keyChanges = (s.changes || []).slice(0, 5).map((c) => `<li><code>${SIGIL[c.kind]}</code> ${both(c.text)}</li>`).join('') ||
+    (k.changes || []).slice(0, 5).map((c) => `<li><code>${SIGIL[c.kind]} ${esc(c.label)}</code></li>`).join('');
+  const scan = `<section class="sm-scan" id="scan" aria-labelledby="scan-h">
+<h2 id="scan-h">${ui('glance')}</h2>
+<dl>
+<dt>${ui('problem')}</dt><dd>${g.meta.task ? both(g.meta.task) : na()}</dd>
+<dt>${ui('cause')}</dt><dd>${causeIdea || na()}</dd>
+<dt>${ui('keyChanges')}</dt><dd>${keyChanges ? `<ul>${keyChanges}</ul>` : na()}</dd>
+<dt>${ui('mainRisk')}</dt><dd>${(s.risks || []).length ? both(s.risks[0]) : k.risks ? both(k.risks) : na()}</dd>
+<dt>${ui('next')}</dt><dd>${s.next ? both(s.next) : na()}</dd>
+</dl>
+</section>`;
+  const start = `<section class="sm-start" id="start" aria-labelledby="start-h">
+<p class="sm-kicker">${ui('startHere')}</p>
+<h1 id="start-h">${both(g.meta.title)}</h1>
+<p class="sm-tldr"><strong>${ui('tldr')}</strong> ${s.insight ? both(s.insight) : s.overall ? both(s.overall) : na()}</p>
+<dl class="sm-know">
+${g.meta.task ? `<dt>${ui('task')}</dt><dd>${both(g.meta.task)}</dd>` : ''}
+${g.meta.stat ? `<dt>${ui('scope')}</dt><dd class="sm-stat">${esc(g.meta.stat)}</dd>` : ''}
+<dt>${ui('keyNode')}</dt><dd>${nodeLink(k)} ${badge(k)}</dd>
+</dl>
+<p class="sm-cta-row"><a class="sm-cta" href="#step-1">${ui('start')} →</a> <a class="sm-quiet" href="#deep">${ui('skipAll')}</a></p>
+<ol class="sm-progress" aria-label="steps">${[1, 2, 3, 4, 5].map((i) => `<li><a href="#step-${i}">${ui('n' + i)}</a></li>`).join('')}</ol>
+</section>`;
+  return { start, scan, steps: `<div class="sm-guided" id="guided">${s1}${s2}${s3}${s4}${s5}</div>` };
+}
+
+const disc = (id, key, inner) => (inner ? `<details class="sm-disc" id="${id}"><summary><h2>${ui(key)}</h2></summary>${inner}</details>` : '');
+
+function buildPage(g, svgs, interactive) {
   const lang = primaryLang(g);
   const bilingual = g.meta.language.includes('-');
   const s = g.summary || {};
+  const d = derive(g);
+  const gd = guidedHtml(g, d);
   const byId = new Map(g.nodes.map((n) => [n.id, n]));
   const changed = g.nodes.filter((n) => n.change && n.change !== 'unchanged');
   const hasDetail = (n) => n.explanation || n.before || n.after || n.why || n.learn || (n.changes || []).length;
   const cards = changed.length ? changed : g.nodes.filter(hasDetail);
-  const title = pick(g.meta.title, lang);
-  const diagrams = svgs.map((svg, i) =>
-    `<div class="sm-diagram">${svg.replace(/my-svg/g, `showme-d${i + 1}`)}</div>`).join('\n');
-  const rows = g.nodes.map((n) => `<tr><td>${both(n.label)}<br><code class="sm-id">${esc(n.id)}</code></td><td>${esc(n.type)}</td><td>${badge(n)}</td><td>${both(n.description)}</td><td><ul class="sm-ev">${evidenceHtml(n)}</ul></td></tr>`).join('\n');
+  const diagrams = svgs.map((svg, i) => `<div class="sm-diagram">${svg.replace(/my-svg/g, `showme-d${i + 1}`)}</div>`).join('\n');
+  const rows = g.nodes.map((n) => `<tr id="node-${esc(n.id)}"><td>${both(n.label)}<br><code class="sm-id">${esc(n.id)}</code></td><td>${esc(n.type)}</td><td>${badge(n)}</td><td>${both(n.description)}</td><td><ul class="sm-ev">${evidenceHtml(n)}</ul></td></tr>`).join('\n');
   const rels = (g.edges || []).map((e) => `<li>${both(byId.get(e.source).label)} <span class="sm-arrow">→</span> ${both(byId.get(e.target).label)} <span class="sm-muted">${esc(e.type || '')}${e.label ? ' · ' : ''}</span>${both(e.label)}${e.confidence && e.confidence !== 'fact' ? ` <span class="sm-tag sm-tag-${e.confidence}">${ui(e.confidence)}</span>` : ''}</li>`).join('\n');
   // "<" is escaped so graph text can never close the inline script block.
-  const json = JSON.stringify(g).split('<').join('\\' + 'u003c');
+  const json = JSON.stringify({ ...g, _derived: d }).split('<').join('\\' + 'u003c');
+  const big = (s.insight ? `<p class="sm-lead">${both(s.insight)}</p>` : '') +
+    (s.before || s.after ? `<div class="sm-ba">${block('before', both(s.before, 'pre'))}${block('after', both(s.after, 'pre'))}</div>` : '');
 
   return `<!doctype html>
 <html lang="${lang}" data-lang="${lang}"${bilingual ? ' data-bilingual="1"' : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · showme</title>
+<title>${esc(pick(g.meta.title, lang))} · showme</title>
 <link rel="stylesheet" href="showme.css">
 </head>
 <body>
+<a class="sm-skip" href="#start">${ui('startHere')}</a>
 <header class="sm-header">
-  <div>
-    <p class="sm-kicker">SHOWME · ${esc(g.meta.mode)}</p>
-    <h1>${both(g.meta.title)}</h1>
-    ${g.meta.task ? `<p class="sm-task"><strong>${ui('task')}:</strong> ${both(g.meta.task)}</p>` : ''}
+  <p class="sm-brand">SHOWME · ${esc(g.meta.mode)}</p>
+  <div class="sm-tools">
+    <div id="showme-modes" class="sm-seg" hidden></div>
+    <div id="showme-prefs" class="sm-prefs" hidden></div>
+    <div id="showme-lang" class="sm-seg" hidden></div>
   </div>
-  <div id="showme-lang" class="sm-lang" hidden></div>
 </header>
 <main>
-${diffSummary(g)}
-${s.insight || s.before || s.after ? `<section class="sm-section">
-  <h2>${ui('insight')}</h2>
-  ${s.insight ? `<p class="sm-lead">${both(s.insight)}</p>` : ''}
-  ${s.before || s.after ? `<div class="sm-ba">${block('before', both(s.before, 'pre'))}${block('after', both(s.after, 'pre'))}</div>` : ''}
-</section>` : ''}
-<section class="sm-section">
-  <h2>${ui('visual')}</h2>
+${gd.start}
+${gd.scan}
+${gd.steps}
+<details class="sm-disc sm-map" id="map" open>
+  <summary><h2>${ui('map')}</h2></summary>
   ${interactive ? '<div id="showme-explorer" class="sm-explorer" hidden></div>' : ''}
   ${diagrams ? (interactive ? `<details class="sm-static" id="showme-static" open><summary>${ui('staticMap')}</summary>${diagrams}</details>` : diagrams) : ''}
-</section>
-${cards.length ? `<section class="sm-section"><h2>${ui('changes')}</h2><div class="sm-cards">${cards.map(changeCard).join('\n')}</div></section>` : ''}
-${(s.hotspots || []).length ? `<section class="sm-section"><h2>${ui('hotspots')}</h2>${list(s.hotspots)}</section>` : ''}
-${(s.risks || []).length ? `<section class="sm-section"><h2>${ui('risks')}</h2>${list(s.risks)}</section>` : ''}
-${s.next ? `<section class="sm-section"><h2>${ui('next')}</h2><p>${both(s.next)}</p></section>` : ''}
-${(s.learn || []).length ? `<section class="sm-section"><h2>${ui('learn')}</h2>${list(s.learn)}</section>` : ''}
-<details class="sm-section sm-reference">
-  <summary>${ui('reference')}</summary>
-  <div class="sm-scroll"><table>
-  <thead><tr><th>${ui('node')}</th><th>${ui('type')}</th><th>${ui('state')}</th><th>${ui('role')}</th><th>${ui('evidence')}</th></tr></thead>
-  <tbody>
-${rows}
-  </tbody></table></div>
-  ${rels ? `<h3>${ui('relationships')}</h3><ul class="sm-rels">${rels}</ul>` : ''}
 </details>
+<div id="deep">
+${disc('d-diff', 'diff', diffInner(g))}
+${disc('d-big', 'insight', big)}
+${disc('d-changes', 'changes', cards.length ? `<div class="sm-cards">${cards.map(changeCard).join('\n')}</div>` : '')}
+${disc('d-hotspots', 'hotspots', list(s.hotspots))}
+${disc('d-risks', 'risks', list(s.risks))}
+${disc('d-next', 'next', s.next ? `<p>${both(s.next)}</p>` : '')}
+${disc('d-learn', 'learn', list(s.learn))}
+${disc('d-ref', 'reference', `<div class="sm-scroll"><table>
+<thead><tr><th>${ui('node')}</th><th>${ui('type')}</th><th>${ui('state')}</th><th>${ui('role')}</th><th>${ui('evidence')}</th></tr></thead>
+<tbody>
+${rows}
+</tbody></table></div>${rels ? `<h3>${ui('relationships')}</h3><ul class="sm-rels">${rels}</ul>` : ''}`)}
+</div>
 </main>
 ${interactive ? `<script type="application/json" id="showme-graph">${json}</script>\n<script src="showme.js"></script>` : ''}
 </body>
@@ -393,7 +518,7 @@ if (cmd === 'validate') {
     .sort((a, b) => (a === 'map.svg' ? -1 : b === 'map.svg' ? 1 : a.localeCompare(b)));
   const svgs = svgNames.map((f) => fs.readFileSync(path.join(dir, f), 'utf8').replace(/^<\?xml[^>]*\?>\s*/, ''));
   if (!svgs.length) console.error('warning: no .svg in the directory; the page has no static diagram fallback');
-  fs.writeFileSync(path.join(dir, 'index.html'), buildHtml(g, svgs, interactive));
+  fs.writeFileSync(path.join(dir, 'index.html'), buildPage(g, svgs, interactive));
   fs.writeFileSync(path.join(dir, 'summary.md'), buildSummaryMd(g));
   fs.copyFileSync(path.join(VIEWER, 'showme.css'), path.join(dir, 'showme.css'));
   if (interactive) fs.copyFileSync(path.join(VIEWER, 'showme.js'), path.join(dir, 'showme.js'));
